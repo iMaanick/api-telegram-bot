@@ -78,13 +78,13 @@ bot.on('callback_query', async msg => {
     console.log(msg.message.message_id);
     if (msg.message.message_id != undefined) {
         //console.log(messageId.message_id);
-        try{
+        try {
             await bot.deleteMessage(chatId, msg.message.message_id);
             deleteRow(chatId, msg.message.message_id);
             console.log(chatId)
             console.log(msg.message.message_id)
         }
-        catch(err){
+        catch (err) {
             console.log(err)
         }
     }
@@ -92,14 +92,16 @@ bot.on('callback_query', async msg => {
 
 
 cron.schedule('* * * * * *', async () => {
-
-    const data = await pool.query(
+    let data = await pool.query(
         `SELECT to_char(date,'YYYY-MM-DD'), text, time, id, user_id, "messageId" FROM notifications`
     )
     const date = new Date();
+    //WTF i need utc + 3
+    date.setTime(date.getTime() + 3 * 60 *60 * 1000)
+
     data.rows.forEach(async (element) => {
         if (Date.parse(element.to_char + "T" + element.time + ".000Z") <= date) {
-            const chatId = await pool.query(
+            let chatId = await pool.query(
                 `SELECT "chatId" FROM users
         WHERE id = $1`, [element.user_id]
             )
@@ -110,13 +112,13 @@ cron.schedule('* * * * * *', async () => {
                     try {
                         await bot.deleteMessage(chatId.rows[0].chatId, element.messageId);
                     }
-                    catch (err){
+                    catch (err) {
                         console.log('msg was already deleted');
                     }
                 }
                 // sending new msg and saving its msgId
                 let messageId = await (await bot.sendMessage(chatId.rows[0].chatId, element.text, options)).message_id;
-                
+
                 await pool.query(
                     `UPDATE notifications set "messageId" = ($1)
                     WHERE id = ($2)`, [messageId, element.id], (err, results) => {
@@ -126,5 +128,41 @@ cron.schedule('* * * * * *', async () => {
                 })
             }
         }
+    });
+    // // send Reminders
+    data = await pool.query(
+        `SELECT to_char(date,'YYYY-MM-DD'), text, time, id, notification_id FROM reminders`
+    )
+
+    data.rows.forEach(async (element) => {
+        if (Date.parse(element.to_char + "T" + element.time + ".000Z") <= date) {
+            const userId = await pool.query(
+                `SELECT user_id FROM notifications
+        WHERE id = $1`, [element.notification_id]
+            )
+
+            if (userId.rows[0] != undefined) {
+
+                chatId = await pool.query(
+                    `SELECT "chatId" FROM users
+        WHERE id = $1`, [userId.rows[0].user_id]
+                )
+                if (chatId.rows[0].chatId != undefined){
+
+                    console.log(chatId.rows[0].chatId);
+                    bot.sendMessage(chatId.rows[0].chatId, "REMINDER: \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \u2757\ufe0f \n" + element.text + "\n until " + element.to_char + element.time);
+                    pool.query(
+                        `
+                        DELETE FROM reminders 
+                        WHERE id = $1`, [element.id], function (err) {
+                        if (err) {
+                            console.log(err);
+                        }
+                    })
+                }
+            }
+        }
+
+
     });
 })
